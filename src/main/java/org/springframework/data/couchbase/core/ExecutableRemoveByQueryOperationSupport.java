@@ -82,7 +82,7 @@ public class ExecutableRemoveByQueryOperationSupport implements ExecutableRemove
 
 		@Override
 		public RemoveByQueryWithConsistency<T> inCollection(final String collection) {
-			Assert.hasText(collection, "Collection must not be null nor empty.");
+			//Assert.hasText(collection, "Collection must not be null nor empty.");
 			return new ExecutableRemoveByQuerySupport<>(template, domainType, query, scanConsistency, collection);
 		}
 

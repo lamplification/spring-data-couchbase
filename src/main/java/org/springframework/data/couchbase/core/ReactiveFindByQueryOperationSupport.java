@@ -15,6 +15,11 @@
  */
 package org.springframework.data.couchbase.core;
 
+import com.couchbase.client.java.manager.collection.CollectionSpec;
+import com.couchbase.client.java.manager.collection.ScopeSpec;
+import com.couchbase.client.java.query.QueryOptions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -37,6 +42,8 @@ public class ReactiveFindByQueryOperationSupport implements ReactiveFindByQueryO
 
 	private final ReactiveCouchbaseTemplate template;
 
+	private static final Logger LOG = LoggerFactory.getLogger(ReactiveFindByQueryOperationSupport.class);
+
 	public ReactiveFindByQueryOperationSupport(final ReactiveCouchbaseTemplate template) {
 		this.template = template;
 	}
@@ -54,8 +61,16 @@ public class ReactiveFindByQueryOperationSupport implements ReactiveFindByQueryO
 		private final Class<T> returnType;
 		private final Query query;
 		private final QueryScanConsistency scanConsistency;
-		private final String collection;
+		private final String collectionName;
+		// scopeName is not final so it can be overridden with query.getScopeName()
+		private String scopeName; // unused - there is no withScope(scopeName) on the template fluent api (yet).
 		private final String[] distinctFields;
+		// this would hold scanConsistency etc. from the fluent api if they were converted from standalone fields
+		// withScope(scopeName) could put raw("query_context",default:<bucket>.<scope>)
+		// this is not the options argument in save( entity, options ). That becomes query.getCouchbaseOptions()
+		private final QueryOptions options = QueryOptions.queryOptions();
+		// this would hold collectionSpec from the fluent api
+		// private CollectionSpec collectionSpec;
 
 		ReactiveFindByQuerySupport(final ReactiveCouchbaseTemplate template, final Class<?> domainType,
 				final Class<T> returnType, final Query query, final QueryScanConsistency scanConsistency,
@@ -68,7 +83,8 @@ public class ReactiveFindByQueryOperationSupport implements ReactiveFindByQueryO
 			this.returnType = returnType;
 			this.query = query;
 			this.scanConsistency = scanConsistency;
-			this.collection = collection;
+			this.collectionName = collection;
+			this.scopeName = null;
 			this.distinctFields = distinctFields;
 		}
 
@@ -80,7 +96,8 @@ public class ReactiveFindByQueryOperationSupport implements ReactiveFindByQueryO
 			} else {
 				scanCons = scanConsistency;
 			}
-			return new ReactiveFindByQuerySupport<>(template, domainType, returnType, query, scanCons, collection,
+			return new ReactiveFindByQuerySupport<>(template, domainType, returnType, query, scanCons,
+					collectionName,
 					distinctFields);
 		}
 
@@ -94,27 +111,31 @@ public class ReactiveFindByQueryOperationSupport implements ReactiveFindByQueryO
 		@Override
 		@Deprecated
 		public FindByQueryConsistentWith<T> consistentWith(QueryScanConsistency scanConsistency) {
-			return new ReactiveFindByQuerySupport<>(template, domainType, returnType, query, scanConsistency, collection,
+			return new ReactiveFindByQuerySupport<>(template, domainType, returnType, query, scanConsistency,
+					collectionName,
 					distinctFields);
 		}
 
 		@Override
 		public FindByQueryWithConsistency<T> withConsistency(QueryScanConsistency scanConsistency) {
-			return new ReactiveFindByQuerySupport<>(template, domainType, returnType, query, scanConsistency, collection,
+			return new ReactiveFindByQuerySupport<>(template, domainType, returnType, query, scanConsistency,
+					collectionName,
 					distinctFields);
 		}
 
 		@Override
 		public <R> FindByQueryWithConsistency<R> as(Class<R> returnType) {
 			Assert.notNull(returnType, "returnType must not be null!");
-			return new ReactiveFindByQuerySupport<>(template, domainType, returnType, query, scanConsistency, collection,
+			return new ReactiveFindByQuerySupport<>(template, domainType, returnType, query, scanConsistency,
+					collectionName,
 					distinctFields);
 		}
 
 		@Override
 		public FindByQueryWithDistinct<T> distinct(String[] distinctFields) {
 			Assert.notNull(distinctFields, "distinctFields must not be null!");
-			return new ReactiveFindByQuerySupport<>(template, domainType, returnType, query, scanConsistency, collection,
+			return new ReactiveFindByQuerySupport<>(template, domainType, returnType, query, scanConsistency,
+					collectionName,
 					distinctFields);
 		}
 
@@ -131,12 +152,69 @@ public class ReactiveFindByQueryOperationSupport implements ReactiveFindByQueryO
 		@Override
 		public Flux<T> all() {
 			return Flux.defer(() -> {
-				String statement = assembleEntityQuery(false, distinctFields);
-				Mono<ReactiveQueryResult> allResult = this.collection == null
-						? template.getCouchbaseClientFactory().getCluster().reactive().query(statement,
-								query.buildQueryOptions(scanConsistency))
-						: template.getCouchbaseClientFactory().getScope().reactive().query(statement,
-								query.buildQueryOptions(scanConsistency));
+				LOG.info("query: {} query.getCollection(): {}", query, query.getCollection());
+				// If there is no collection and no scope, or _default._default
+				// for ById, just collection name from collection is used
+				// for Query, both the Scope and Collection name from collection need to be used
+				// if scope name is _use_clientFactory_scope or null, use scope from clientFactory
+
+				// There is (currently) no scope from fluent api (withScope(scopeName)), but if there were, this is how we would
+				// create the ScopeSpec
+				// It would just have the scopeName, no collections.
+				/****************************************
+				ScopeSpec fluentScope = scopeName != null ? ScopeSpec.create(scopeName, new HashSet<CollectionSpec>())
+						: ScopeSpec.create(template.getCouchbaseClientFactory().getScope().name(), new HashSet<CollectionSpec>());
+
+				// merge the fluent scope with scope from extra ScopeSpec arg
+				// the extra ScopeSpec arg/repository.withScope() overrides the fluentScope
+				ScopeSpec ss = query.mergeScopeSpec(fluentScope);
+
+				// collectionName from fluent api
+				CollectionSpec fluentCollection = collection != null
+						? CollectionSpec.create(collection, template.getCouchbaseClientFactory().getScope().name())
+						: null;
+				// merge collection (override) with collection from extra CollectionSpec arg
+				CollectionSpec cs = query.mergeCollectionSpec(fluentCollection);
+
+				if (cs == null && ss != null)
+					cs = ss.collections().iterator().next();
+
+				String scopeName = ss != null ? ss.name() : (cs != null ? cs.scopeName() : null);
+				String collectionName = cs != null ? cs.name()
+						: (ss != null ? ss.collections().iterator().next().name() : null);
+
+				if ("_use_clientFactory_scope".equals(scopeName)) { // this is from withCollection() of DynamicProxy
+					scopeName = template.getCouchbaseClientFactory().getScope() == null ? null
+							: template.getCouchbaseClientFactory().getScope().name();
+				}
+				if ("_default".equals(scopeName) && "_default".equals(collectionName)) {
+					scopeName = null;
+					collectionName = null;
+				}
+				 **********************************************************/
+				// this.scopeName is from template fluent api
+				// query.getScopeName is from ScopeName argument to repository call (better would be from q.getCouchbaseOptions())
+				// the scopeName from options will override scopeName from fluent api.
+				String scopeForQuery =  query.getScopeName() != null ? query.getScopeName().toString() : scopeName;
+				String collectionForQuery =  query.getCollectionName() != null ? query.getCollectionName().toString() : collectionName;
+				if( (scopeForQuery == null || "_default".equals(scopeForQuery)) && (collectionForQuery == null || "_default".equals(collectionForQuery))){
+					scopeForQuery = null;
+					collectionForQuery = null;
+				}
+				if(collectionForQuery != null && scopeForQuery == null ) {
+					scopeForQuery = template.getCouchbaseClientFactory().getScope().name();
+				}
+				scopeName = scopeForQuery;
+				String statement = assembleEntityQuery(false, distinctFields, collectionForQuery);
+
+				LOG.info("statement: {}", statement);
+				LOG.info("scopeName: {} factory.getScope(): {} query.getCollection(): {}", scopeForQuery,
+						template.getCouchbaseClientFactory().getScope(), query.getCollection());
+				// instead of using getCluster() or getScope(), we can just set options.raw(query_context, default:bucket.scope)
+				Mono<ReactiveQueryResult> allResult = scopeForQuery == null
+						? template.getCouchbaseClientFactory().getCluster().reactive().query(statement, buildOptions())
+						: template.getCouchbaseClientFactory().withScope(scopeForQuery).getScope().reactive().query(statement,
+								buildOptions());
 				return allResult.onErrorMap(throwable -> {
 					if (throwable instanceof RuntimeException) {
 						return template.potentiallyConvertRuntimeException((RuntimeException) throwable);
@@ -158,14 +236,31 @@ public class ReactiveFindByQueryOperationSupport implements ReactiveFindByQueryO
 		}
 
 		@Override
+		public QueryOptions buildOptions() {
+			QueryOptions opts = query.buildQueryOptions(scanConsistency);
+			if( scopeName != null)
+				opts.raw("query_context","default:`"+template.getCouchbaseClientFactory().getBucket().name()+"`."+scopeName);
+			return opts;
+		}
+
+		@Override
 		public Mono<Long> count() {
 			return Mono.defer(() -> {
-				String statement = assembleEntityQuery(true, distinctFields);
-				Mono<ReactiveQueryResult> countResult = this.collection == null
-						? template.getCouchbaseClientFactory().getCluster().reactive().query(statement,
-								query.buildQueryOptions(scanConsistency))
-						: template.getCouchbaseClientFactory().getScope().reactive().query(statement,
-								query.buildQueryOptions(scanConsistency));
+				CollectionSpec queryCollection = collectionName != null
+						? CollectionSpec.create(collectionName, template.getCouchbaseClientFactory().getScope().name())
+						: null;
+				CollectionSpec cs = query.mergeCollectionSpec(queryCollection);
+				ScopeSpec ss = query.mergeScopeSpec(null);
+				String statement = assembleEntityQuery(true, distinctFields, cs == null ? null : cs.name());
+				String scopeName = ss != null ? ss.name() : (cs != null ? cs.scopeName() : null);
+				if (scopeName == "unused") {
+					scopeName = template.getCouchbaseClientFactory().getScope() == null ? null
+							: template.getCouchbaseClientFactory().getScope().name();
+				}
+				Mono<ReactiveQueryResult> countResult = this.collectionName == null
+						? template.getCouchbaseClientFactory().getCluster().reactive().query(statement, buildOptions())
+						: template.getCouchbaseClientFactory().withScope(scopeName).getScope().reactive().query(statement,
+								buildOptions());
 				return countResult.onErrorMap(throwable -> {
 					if (throwable instanceof RuntimeException) {
 						return template.potentiallyConvertRuntimeException((RuntimeException) throwable);
@@ -180,12 +275,11 @@ public class ReactiveFindByQueryOperationSupport implements ReactiveFindByQueryO
 
 		@Override
 		public Mono<Boolean> exists() {
-			return count().map(count -> count > 0);
-		} // not efficient, just need the first one
+			return count().map(count -> count > 0); // not efficient, just need the first one
+		}
 
-		private String assembleEntityQuery(final boolean count, String[] distinctFields) {
-			return query.toN1qlSelectString(template, this.collection, this.domainType, this.returnType, count,
-					distinctFields);
+		private String assembleEntityQuery(final boolean count, String[] distinctFields, String collection) {
+			return query.toN1qlSelectString(template, collection, this.domainType, this.returnType, count, distinctFields);
 		}
 	}
 }

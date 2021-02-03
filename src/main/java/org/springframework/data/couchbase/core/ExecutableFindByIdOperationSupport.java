@@ -63,7 +63,7 @@ public class ExecutableFindByIdOperationSupport implements ExecutableFindByIdOpe
 
 		@Override
 		public TerminatingFindById<T> inCollection(final String collection) {
-			Assert.hasText(collection, "Collection must not be null nor empty.");
+			//Assert.hasText(collection, "Collection must not be null nor empty.");
 			return new ExecutableFindByIdSupport<>(template, domainType, collection, fields);
 		}
 

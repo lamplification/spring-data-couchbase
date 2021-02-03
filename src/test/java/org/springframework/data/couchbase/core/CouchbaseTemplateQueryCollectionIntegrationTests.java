@@ -68,8 +68,7 @@ class CouchbaseTemplateQueryCollectionIntegrationTests extends CollectionAwareIn
 		// first call the super method
 		callSuperBeforeAll(new Object() {});
 		// then do processing for this class
-		// collectionName = null;
-		// scopeName = null;
+		// no-op
 	}
 
 	@AfterAll
@@ -86,16 +85,19 @@ class CouchbaseTemplateQueryCollectionIntegrationTests extends CollectionAwareIn
 		// first call the super method
 		super.beforeEach();
 		// then do processing for this class
+		System.out.println("collection: couchbaseTemplate: "+couchbaseTemplate+" scopeName: "+couchbaseTemplate.getScopeName());
 		couchbaseTemplate.removeByQuery(User.class).inCollection(collectionName).all();
+		couchbaseTemplate.findByQuery(User.class).withConsistency(QueryScanConsistency.REQUEST_PLUS).inCollection(collectionName).all();
 	}
 
 	@AfterEach
 	@Override
 	public void afterEach() {
-		// first call the super method
+		// first do processing for this class
+		couchbaseTemplate.removeByQuery(User.class).inCollection(collectionName).all();
+		couchbaseTemplate.findByQuery(User.class).withConsistency(QueryScanConsistency.REQUEST_PLUS).inCollection(collectionName).all();
+		// then call the super method
 		super.afterEach();
-		// then do processing for this class
-		// no-op
 	}
 
 	@Test

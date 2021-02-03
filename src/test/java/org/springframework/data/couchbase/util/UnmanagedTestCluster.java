@@ -43,6 +43,7 @@ public class UnmanagedTestCluster extends TestCluster {
 	private final String adminPassword;
 	private final int numReplicas;
 	private volatile String bucketname;
+	private long startTime=System.currentTimeMillis();
 
 	UnmanagedTestCluster(final Properties properties) {
 		seedHost = properties.getProperty("cluster.unmanaged.seed").split(":")[0];
@@ -59,7 +60,7 @@ public class UnmanagedTestCluster extends TestCluster {
 
 	@Override
 	TestClusterConfig _start() throws Exception {
-		bucketname = UUID.randomUUID().toString();
+		bucketname = "my_bucket"; // UUID.randomUUID().toString();
 
 		Response postResponse = httpClient
 				.newCall(new Request.Builder().header("Authorization", Credentials.basic(adminUsername, adminPassword))
@@ -69,8 +70,9 @@ public class UnmanagedTestCluster extends TestCluster {
 						.build())
 				.execute();
 
-		if (postResponse.code() != 202) {
-			throw new Exception("Could not create bucket: " + postResponse + ", Reason: " + postResponse.body().string());
+		String reason=postResponse.body().string();
+		if (postResponse.code() != 202 && !(reason.contains("Bucket with given name already exists"))) {
+			throw new Exception("Could not create bucket: " + postResponse + ", Reason: " + reason);
 		}
 
 		Response getResponse = httpClient
@@ -140,10 +142,17 @@ public class UnmanagedTestCluster extends TestCluster {
 	@Override
 	public void close() {
 		try {
-			httpClient
-					.newCall(new Request.Builder().header("Authorization", Credentials.basic(adminUsername, adminPassword))
-							.url("http://" + seedHost + ":" + seedPort + "/pools/default/buckets/" + bucketname).delete().build())
-					.execute();
+			if(!bucketname.equals("my_bucket")) {
+				httpClient
+						.newCall(new Request.Builder().header("Authorization",
+								Credentials.basic(adminUsername,
+										adminPassword))
+								.url("http://" + seedHost + ":" + seedPort + "/pools/default/buckets/" + bucketname)
+								.delete()
+								.build())
+						.execute();
+			}
+			System.out.println("elapsed: "+(System.currentTimeMillis()-startTime));
 		} catch (Exception ex) {
 			throw new RuntimeException(ex);
 		}

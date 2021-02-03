@@ -15,12 +15,29 @@
  */
 package org.springframework.data.couchbase.repository.query;
 
+import com.couchbase.client.java.CommonOptions;
+import com.couchbase.client.java.kv.GetOptions;
+import com.couchbase.client.java.kv.InsertOptions;
+import com.couchbase.client.java.kv.RemoveOptions;
+import com.couchbase.client.java.kv.ReplaceOptions;
+import com.couchbase.client.java.kv.UpsertOptions;
+import com.couchbase.client.java.manager.collection.CollectionSpec;
+import com.couchbase.client.java.manager.collection.ScopeSpec;
+import com.couchbase.client.java.query.QueryOptions;
+import com.couchbase.client.java.search.SearchOptions;
+import org.springframework.data.couchbase.core.support.MapList;
+import org.springframework.http.server.DelegatingServerHttpResponse;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.MonoProcessor;
 
+import java.lang.reflect.Array;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.data.repository.query.ParametersParameterAccessor;
 import org.springframework.data.repository.util.ReactiveWrapperConverters;
@@ -37,6 +54,7 @@ import org.springframework.data.repository.util.ReactiveWrappers;
 public class ReactiveCouchbaseParameterAccessor extends ParametersParameterAccessor {
 
 	private final List<MonoProcessor<?>> subscriptions;
+	private final MapList<Class<?>, Object> paramsOfType=new MapList();
 
 	public ReactiveCouchbaseParameterAccessor(CouchbaseQueryMethod method, Object[] values) {
 		super(method.getParameters(), values);
@@ -45,6 +63,10 @@ public class ReactiveCouchbaseParameterAccessor extends ParametersParameterAcces
 		for (int i = 0; i < values.length; i++) {
 
 			Object value = values[i];
+			if(value != null){
+				Object option = option (value);
+				paramsOfType.putOne(option.getClass(), option);
+			}
 
 			if (value == null || !ReactiveWrappers.supports(value.getClass())) {
 				subscriptions.add(null);
@@ -57,6 +79,24 @@ public class ReactiveCouchbaseParameterAccessor extends ParametersParameterAcces
 				subscriptions.add(ReactiveWrapperConverters.toWrapper(value, Flux.class).collectList().toProcessor());
 			}
 		}
+
+	}
+
+	private Object option(Object maybeOption) {
+		Class<?> clazz = maybeOption.getClass();
+		Class<?> componentClazz = clazz.getComponentType();
+		if( componentClazz != null){
+			Object[] optionArray = ((Object[])maybeOption);
+			if(optionArray.length == 1){
+				maybeOption = optionArray[0];
+			} else if (CommonOptions.class.isAssignableFrom(componentClazz) || CollectionSpec.class.isAssignableFrom(componentClazz) || ScopeSpec.class.isAssignableFrom(componentClazz)){
+				throw new IllegalArgumentException("there must be no more than one parameter of type "+clazz);
+			} else {
+				maybeOption = optionArray;
+			}
+		}
+		return  maybeOption;
+
 	}
 
 	/* (non-Javadoc)
@@ -79,4 +119,24 @@ public class ReactiveCouchbaseParameterAccessor extends ParametersParameterAcces
 	public Object getBindableValue(int index) {
 		return getValue(getParameters().getBindableParameter(index).getIndex());
 	}
+
+	public <T> List<T> getParamsOfType(Class<T> type) {
+		List<T> result=new LinkedList();
+		for(Class<?> t:paramsOfType.keySet()){
+			if (type.isAssignableFrom(t)){
+				result.add((T)t);
+			}
+		}
+		return result;
+	}
+
+	public <T>  T getParamOfType(Class<T> type) {
+		List<T> result = getParamsOfType(type);
+		if(result.size() > 1){
+			throw new IllegalArgumentException("there are multiple types of parameters that "+type+" isAssignableFrom"+result);
+		}
+		return result.size() == 1 ? (T)paramsOfType.getOne((Class<?>)result.get(0)) : null;
+	}
+
+
 }

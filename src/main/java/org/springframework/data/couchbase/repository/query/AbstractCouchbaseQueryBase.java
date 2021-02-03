@@ -15,6 +15,12 @@
  */
 package org.springframework.data.couchbase.repository.query;
 
+import com.couchbase.client.java.Collection;
+import com.couchbase.client.java.CommonOptions;
+import com.couchbase.client.java.manager.collection.CollectionSpec;
+import com.couchbase.client.java.manager.collection.ScopeSpec;
+import org.springframework.data.couchbase.core.support.CollectionName;
+import org.springframework.data.couchbase.core.support.ScopeName;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -108,6 +114,7 @@ public abstract class AbstractCouchbaseQueryBase<CouchbaseOperationsType> implem
 	 * 
 	 * @see org.springframework.data.repository.query.RepositoryQuery#execute(java.lang.Object[])
 	 */
+	//TODO: either way, the first thing that happens is a ReactiveCouchbaseParameterAccessor is created (?)
 	public Object execute(Object[] parameters) {
 		return method.hasReactiveWrapperParameter() ? executeDeferred(parameters)
 				: execute(new ReactiveCouchbaseParameterAccessor(getQueryMethod(), parameters));
@@ -130,6 +137,7 @@ public abstract class AbstractCouchbaseQueryBase<CouchbaseOperationsType> implem
 		if (typeToRead == null && returnType.getComponentType() != null) {
 			typeToRead = returnType.getComponentType().getType();
 		}
+
 		return doExecute(getQueryMethod(), processor, parameterAccessor, typeToRead);
 	}
 
@@ -160,6 +168,32 @@ public abstract class AbstractCouchbaseQueryBase<CouchbaseOperationsType> implem
 		return query.scanConsistency(method.getScanConsistencyAnnotation().query());
 	}
 
+	protected Query applyCouchbaseOptionsIfPresent(Query query, ParametersParameterAccessor accessor){
+		ReactiveCouchbaseParameterAccessor pa = (ReactiveCouchbaseParameterAccessor)accessor;
+		CommonOptions<?> paramOptions = pa.getParamOfType(CommonOptions.class);
+		if(paramOptions != null) {
+			query.setCouchbaseOptions(paramOptions);
+		}
+		CollectionName paramCollectionName = pa.getParamOfType(CollectionName.class);
+		if(paramCollectionName != null) {
+			query.setCollectionName(paramCollectionName);
+		}
+		ScopeName paramScopeName = pa.getParamOfType(ScopeName.class);
+		if(paramScopeName != null) {
+			query.setScopeName(paramScopeName);
+		}
+		/*
+		CollectionSpec paramCollection = pa.getParamOfType(CollectionSpec.class);
+		if(paramCollection != null) {
+			query.setCollection(paramCollection);
+		}
+		ScopeSpec paramScope = pa.getParamOfType(ScopeSpec.class);
+		if(paramScope != null) {
+			query.setScope(paramScope);
+		}
+		 */
+		return query;
+	};
 	/**
 	 * Creates a {@link Query} instance using the given {@link ParametersParameterAccessor}. Will delegate to
 	 * {@link #createQuery(ParametersParameterAccessor)} by default but allows customization of the count query to be

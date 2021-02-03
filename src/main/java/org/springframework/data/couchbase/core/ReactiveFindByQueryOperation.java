@@ -15,6 +15,7 @@
  */
 package org.springframework.data.couchbase.core;
 
+import com.couchbase.client.java.query.QueryOptions;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -85,6 +86,8 @@ public interface ReactiveFindByQueryOperation {
 		 * @return {@literal true} if at least one matching element exists.
 		 */
 		Mono<Boolean> exists();
+
+		QueryOptions buildOptions();
 
 	}
 

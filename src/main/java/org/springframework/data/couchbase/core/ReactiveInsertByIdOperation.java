@@ -15,6 +15,8 @@
  */
 package org.springframework.data.couchbase.core;
 
+import com.couchbase.client.java.kv.InsertOptions;
+import org.springframework.data.couchbase.core.mapping.CouchbaseDocument;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -37,6 +39,8 @@ public interface ReactiveInsertByIdOperation {
 		Mono<T> one(T object);
 
 		Flux<? extends T> all(Collection<? extends T> objects);
+
+		InsertOptions buildOptions(CouchbaseDocument doc);
 
 	}
 

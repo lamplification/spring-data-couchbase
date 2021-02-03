@@ -77,7 +77,7 @@ public class ExecutableReplaceByIdOperationSupport implements ExecutableReplaceB
 
 		@Override
 		public TerminatingReplaceById<T> inCollection(final String collection) {
-			Assert.hasText(collection, "Collection must not be null nor empty.");
+			//Assert.hasText(collection, "Collection must not be null nor empty.");
 			return new ExecutableReplaceByIdSupport<>(template, domainType, collection, persistTo, replicateTo,
 					durabilityLevel, expiry);
 		}

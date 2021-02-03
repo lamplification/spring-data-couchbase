@@ -22,7 +22,6 @@ import java.time.Duration;
 import java.util.Collection;
 
 import org.springframework.data.couchbase.core.mapping.CouchbaseDocument;
-import org.springframework.data.couchbase.core.mapping.Document;
 import org.springframework.util.Assert;
 
 import com.couchbase.client.core.msg.kv.DurabilityLevel;
@@ -72,7 +71,7 @@ public class ReactiveInsertByIdOperationSupport implements ReactiveInsertByIdOpe
 			return Mono.just(object).flatMap(o -> {
 				CouchbaseDocument converted = template.support().encodeEntity(o);
 				return template.getCollection(collection).reactive()
-						.insert(converted.getId(), converted.export(), buildInsertOptions(converted)).map(result -> {
+						.insert(converted.getId(), converted.export(), buildOptions(converted)).map(result -> {
 							Object updatedObject = template.support().applyUpdatedId(o, converted.getId());
 							return (T) template.support().applyUpdatedCas(updatedObject, result.cas());
 						});
@@ -90,7 +89,8 @@ public class ReactiveInsertByIdOperationSupport implements ReactiveInsertByIdOpe
 			return Flux.fromIterable(objects).flatMap(this::one);
 		}
 
-		private InsertOptions buildInsertOptions(CouchbaseDocument doc) { // CouchbaseDocument converted
+		@Override
+		public InsertOptions buildOptions(CouchbaseDocument doc) { // CouchbaseDocument converted
 			final InsertOptions options = InsertOptions.insertOptions();
 			if (persistTo != PersistTo.NONE || replicateTo != ReplicateTo.NONE) {
 				options.durability(persistTo, replicateTo);

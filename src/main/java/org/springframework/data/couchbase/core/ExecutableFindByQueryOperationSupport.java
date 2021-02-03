@@ -113,7 +113,7 @@ public class ExecutableFindByQueryOperationSupport implements ExecutableFindByQu
 
 		@Override
 		public FindByQueryWithConsistency<T> inCollection(final String collection) {
-			Assert.hasText(collection, "Collection must not be null nor empty.");
+			//Assert.hasText(collection, "Collection must not be null nor empty.");
 			return new ExecutableFindByQuerySupport<>(template, domainType, returnType, query, scanConsistency, collection,
 					distinctFields);
 		}

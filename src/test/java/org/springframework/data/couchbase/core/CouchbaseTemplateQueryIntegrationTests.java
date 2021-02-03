@@ -67,11 +67,19 @@ class CouchbaseTemplateQueryIntegrationTests extends JavaIntegrationTests {
 	@BeforeEach
 	@Override
 	public void beforeEach() {
-		ApplicationContext ac = new AnnotationConfigApplicationContext(Config.class);
-		couchbaseTemplate = (CouchbaseTemplate) ac.getBean(COUCHBASE_TEMPLATE);
-		reactiveCouchbaseTemplate = (ReactiveCouchbaseTemplate) ac.getBean(REACTIVE_COUCHBASE_TEMPLATE);
+		// already setup by JavaIntegrationTests.beforAll()
+		// ApplicationContext ac = new AnnotationConfigApplicationContext(Config.class);
+		// couchbaseTemplate = (CouchbaseTemplate) ac.getBean(COUCHBASE_TEMPLATE);
+		// reactiveCouchbaseTemplate = (ReactiveCouchbaseTemplate) ac.getBean(REACTIVE_COUCHBASE_TEMPLATE);
 		// ensure each test starts with clean state
-		couchbaseTemplate.removeByQuery(User.class).all();
+		System.out.println(
+				"bucket   couchbaseTemplate: " + couchbaseTemplate + " scopeName: " + couchbaseTemplate.getScopeName());
+		try {
+			couchbaseTemplate.removeByQuery(User.class).all();
+			couchbaseTemplate.findByQuery(User.class).withConsistency(QueryScanConsistency.REQUEST_PLUS).all();
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
 	}
 
 	@Test
@@ -106,13 +114,13 @@ class CouchbaseTemplateQueryIntegrationTests extends JavaIntegrationTests {
 			couchbaseTemplate.findById(User.class).one(user1.getId());
 			reactiveCouchbaseTemplate.findById(User.class).one(user1.getId()).block();
 		} finally {
-			couchbaseTemplate.removeByQuery(User.class).all();
+			couchbaseTemplate.removeByQuery(User.class).withConsistency(QueryScanConsistency.REQUEST_PLUS).all();
 		}
 
-		User usery = couchbaseTemplate.findById(User.class).one("userx");
-		assertNull(usery, "usery should be null");
-		User userz = reactiveCouchbaseTemplate.findById(User.class).one("userx").block();
-		assertNull(userz, "uz should be null");
+		User usery = couchbaseTemplate.findById(User.class).one("user1");
+		assertNull(usery, "user1 should have been deleted");
+		User userz = reactiveCouchbaseTemplate.findById(User.class).one("user2").block();
+		assertNull(userz, "user2 should have been deleted");
 
 	}
 

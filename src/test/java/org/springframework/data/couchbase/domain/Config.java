@@ -205,4 +205,15 @@ public class Config extends AbstractCouchbaseConfiguration {
 		return "t"; // this will override '_class', is passed in to new CustomMappingCouchbaseConverter
 	}
 
+	static String scopeName = null;
+
+	@Override
+	protected String getScopeName() {
+		return scopeName;
+	}
+
+	public static void setScopeName(String scopeName) {
+		Config.scopeName = scopeName;
+	}
+
 }

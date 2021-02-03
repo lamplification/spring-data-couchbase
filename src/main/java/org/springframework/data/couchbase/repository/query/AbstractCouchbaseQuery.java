@@ -15,6 +15,7 @@
  */
 package org.springframework.data.couchbase.repository.query;
 
+import com.couchbase.client.java.CommonOptions;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.data.couchbase.core.CouchbaseOperations;
 import org.springframework.data.couchbase.core.ExecutableFindByQueryOperation;
@@ -42,6 +43,7 @@ public abstract class AbstractCouchbaseQuery extends AbstractCouchbaseQueryBase<
 		implements RepositoryQuery {
 
 	private final ExecutableFindByQueryOperation.ExecutableFindByQuery<?> findOperationWithProjection;
+	//private CommonOptions<?> couchbaseOptions;
 
 	/**
 	 * Creates a new {@link AbstractCouchbaseQuery} from the given {@link ReactiveCouchbaseQueryMethod} and
@@ -80,8 +82,23 @@ public abstract class AbstractCouchbaseQuery extends AbstractCouchbaseQueryBase<
 
 		Query query = createQuery(accessor);
 
+		// TODO:
+		//  @ScanConsistency ignored when this is commented out
+		//  can we do this somewhere where options are already handled? buildQueryOptions? (no - needs queryMethod)
+		//  the above call to createQuery could take the method to apply Annotations
 		query = applyAnnotatedConsistencyIfPresent(query);
+
+		// this takes a possible CommonOptions parameter (QueryOptions, UpsertOptions etc)
+		// and attaches it to the query.  When the final options object is built by
+		// *QuerySupport.buildOptions(), the parameter options will override any other
+		// options that come from annotations or a fluent api
+		query = applyCouchbaseOptionsIfPresent(query, accessor);
+
+		// query = applyAnnotations(query);
+
 		// query = applyAnnotatedCollationIfPresent(query, accessor); // not yet implemented
+
+
 
 		ExecutableFindByQuery<?> find = typeToRead == null ? findOperationWithProjection //
 				: findOperationWithProjection; // not yet implemented in core .as(typeToRead);

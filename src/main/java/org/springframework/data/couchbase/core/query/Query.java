@@ -15,14 +15,29 @@
  */
 package org.springframework.data.couchbase.core.query;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.couchbase.client.java.CommonOptions;
+import com.couchbase.client.java.kv.MutationState;
+import com.couchbase.client.java.manager.collection.CollectionSpec;
+import com.couchbase.client.java.manager.collection.ScopeSpec;
+import com.couchbase.client.java.query.QueryProfile;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.couchbase.core.ReactiveCouchbaseTemplate;
 import org.springframework.data.couchbase.core.convert.CouchbaseConverter;
 import org.springframework.data.couchbase.core.mapping.CouchbasePersistentEntity;
+import org.springframework.data.couchbase.core.support.CollectionName;
+import org.springframework.data.couchbase.core.support.ScopeName;
+import org.springframework.data.couchbase.repository.query.StringBasedCouchbaseQuery;
 import org.springframework.data.couchbase.repository.query.StringBasedN1qlQueryParser;
 import org.springframework.data.couchbase.repository.support.MappingCouchbaseEntityInformation;
 import org.springframework.data.domain.Pageable;
@@ -50,8 +65,14 @@ public class Query {
 	private int limit;
 	private Sort sort = Sort.unsorted();
 	private QueryScanConsistency queryScanConsistency;
+	private CommonOptions<?> couchbaseOptions;
+	private CollectionSpec collection;
+	private ScopeSpec scope;
+	private CollectionName collectionName;
+	private ScopeName scopeName;
 
 	static private final Pattern WHERE_PATTERN = Pattern.compile("\\sWHERE\\s");
+	private static final Logger LOG = LoggerFactory.getLogger(Query.class);
 
 	public Query() {}
 
@@ -270,11 +291,6 @@ public class Query {
 	}
 
 	public String toN1qlSelectString(ReactiveCouchbaseTemplate template, String collectionName, Class domainClass,
-			boolean isCount) {
-		return toN1qlSelectString(template, collectionName, domainClass, null, isCount, null);
-	}
-
-	public String toN1qlSelectString(ReactiveCouchbaseTemplate template, String collectionName, Class domainClass,
 			Class returnClass, boolean isCount, String[] distinctFields) {
 		StringBasedN1qlQueryParser.N1qlSpelValues n1ql = getN1qlSpelValues(template, collectionName, domainClass,
 				returnClass, isCount, distinctFields);
@@ -331,15 +347,225 @@ public class Query {
 				options.parameters((JsonObject) getParameters());
 			}
 		}
+		if (scanConsistency == null) {
+			if (getScanConsistency() != null) {
+				scanConsistency = getScanConsistency();
+			}
+		}
 		if (scanConsistency != null) {
 			options.scanConsistency(scanConsistency);
 		}
 
-		return options;
+		return mergeOptions(options);
+	}
+
+	private QueryOptions mergeOptions(QueryOptions requestOptions) {
+		QueryOptions optionsParam = (QueryOptions) getCouchbaseOptions();
+		if (optionsParam == null) {
+			return requestOptions;
+		}
+		if (requestOptions == null) {
+			return optionsParam;
+		}
+
+		JsonObject requestOpts = JsonObject.create();
+		requestOptions.build().injectParams(requestOpts);
+		LOG.debug("options before: {}", requestOpts);
+
+		QueryOptions queryOptions = (QueryOptions) optionsParam;
+		JsonObject queryOpts = JsonObject.create();
+		QueryOptions.Built built = queryOptions.build();
+		built.injectParams(queryOpts);
+		LOG.debug("options merge : {}", queryOpts);
+
+		// CommonOptions
+		if (built.timeout() != null && built.timeout().isPresent()) {
+			requestOptions.timeout(built.timeout().get());
+		}
+		if (built.retryStrategy() != null && built.retryStrategy().isPresent()) {
+			requestOptions.retryStrategy(built.retryStrategy().get());
+		}
+		if (built.clientContext() != null) {
+			requestOptions.clientContext(built.clientContext());
+		}
+		if (built.parentSpan() != null && built.parentSpan().isPresent()) {
+			requestOptions.parentSpan(built.parentSpan().get());
+		}
+
+		// QueryOptions not injected
+		if (built.serializer() != null) {
+			requestOptions.serializer(built.serializer());
+		}
+		if (built.clientContext() != null) {
+			requestOptions.clientContext(built.clientContext());
+		}
+
+		// everything that is injected
+		// would it be better to just "raw" everything?
+		for (String name : queryOpts.getNames()) {
+
+			if (name.equals("adhoc")) {// private boolean adhoc = true; not accessible, not injected
+				requestOptions.adhoc(queryOpts.getBoolean(name));
+			} else if (name.equals("client_context_id")) {
+				requestOptions.clientContextId(queryOpts.getString(name));
+			} else if (name.equals("scan_vectors")) {
+				requestOptions.consistentWith(MutationState.from(queryOpts.getObject(name).toString()));
+				requestOptions.raw("scan_consistency", "at_plus");
+				requestOpts = JsonObject.create(); // for check to not overwrite with queryOpts.getString("scan_consistency")
+				requestOptions.build().injectParams(requestOpts);
+			} else if (name.equals("max_parallelism")) {
+				requestOptions.maxParallelism(queryOpts.getInt(name));
+			} else if (name.equals("metrics")) {
+				requestOptions.metrics(queryOpts.getBoolean(name));
+			} else if (name.equals("args")) {
+				requestOptions.parameters(queryOpts.getArray(name));
+			} else if (name.equals("pipeline_batch")) {
+				requestOptions.pipelineBatch(queryOpts.getInt(name));
+			} else if (name.equals("profile")) {
+				requestOptions.profile(QueryProfile.valueOf(queryOpts.getString(name).toUpperCase(Locale.ROOT)));
+			} else if (name.equals("readonly")) {
+				requestOptions.readonly(queryOpts.getBoolean(name));
+			} else if (name.equals("scan_wait")) {
+				requestOptions.scanWait(Duration.parse(queryOpts.getString(name)));
+			} else if (name.equals("scan_cap")) {
+				requestOptions.scanCap(queryOpts.getInt(name));
+			} else if (name.equals("scan_consistency")) {
+				// this must not overwrite "at_plus"
+				if (!"at_plus".equals(requestOpts.getString(name))) {
+					requestOptions
+							.scanConsistency(QueryScanConsistency.valueOf(queryOpts.getString(name).toUpperCase(Locale.ROOT)));
+				}
+			} else if (name.equals("use_fts")) {
+				requestOptions.flexIndex(queryOpts.getBoolean(name));
+			} else {
+				if (name.startsWith("$") && requestOpts.get("args") != null) {
+					throw new IllegalArgumentException("cannot have both positional and named args. requestOpts: args:"
+							+ requestOpts.get("args") + " paramOpts: " + name + ":" + queryOpts.get(name));
+				}
+				requestOptions.raw(name, queryOpts.get(name));
+			}
+		}
+
+		if (LOG.isDebugEnabled()) {
+			requestOpts = JsonObject.create();
+			requestOptions.build().injectParams(requestOpts);
+			LOG.debug("options after : {}", requestOpts);
+		}
+		return requestOptions;
+	}
+
+	/**
+	 * if there is an additional arg collection such as  save(entity, CollectionSpec) or
+	 * repository.withCollection(collectionName), use that
+	 * otherwise use the collection based on the fluent inCollection(collectionName)
+	 * this needs to be done before the caller uses the collection to decide how to make the call
+	 *
+	 * @param fluentCollection
+	 * @return
+	 */
+	public CollectionSpec mergeCollectionSpec(CollectionSpec fluentCollection) {
+		LOG.debug("collection before: {}", fluentCollection); // from fluent api
+		LOG.debug("collection merge : {}", getCollection());   // from additional arg
+		CollectionSpec resultCollection;
+		if (getCollection() != null) {
+			resultCollection = getCollection();
+		} else {
+			resultCollection = fluentCollection;
+		}
+		LOG.debug("collection after : {}", getCollection());
+		if( resultCollection != null && getScope() != null){
+			if ( !getScope().collections().contains(resultCollection)){
+				throw new IllegalArgumentException("scope specified does not contain collection specified: scope: "+getScope()+" collection: "+getCollection());
+			}
+		}
+
+		return resultCollection;
+	}
+
+	/**
+	 * if there is an additional arg scope such as  save(entity, ScopeSpec) or
+	 * repository.withScope(scopeName|scopeSpec), use that
+	 * otherwise use the scope based on the fluent inScope(scopeName)
+	 * this needs to be done before the caller uses the collection to decide how to make the call
+	 *
+	 * @param fluentScope
+	 * @return
+	 */
+	public ScopeSpec mergeScopeSpec(ScopeSpec fluentScope) {
+		LOG.debug("scope before: {}", fluentScope); // from fluent api
+		LOG.debug("scope merge : {}", getScope());  // from additional arg
+
+		ScopeSpec resultScope=null;
+
+		if (getScope() == null) {
+			resultScope = fluentScope;
+		} else if (fluentScope == null || ! fluentScope.name().equals(getScope().name())){
+			resultScope =  getScope();
+		} else { // create new scope from additional arg scope plus collections from fluent scope
+			Set<CollectionSpec> collections = fluentScope.collections();
+			collections.addAll(getScope().collections());
+			resultScope = ScopeSpec.create(getScope().name(), collections);
+		}
+		LOG.debug("scope after : {}", getScope());
+		if( getCollection() != null && resultScope != null && resultScope.collections() != null ) { //TODO:
+			if ( !resultScope.collections().contains(getCollection())){
+				resultScope.collections().add(getCollection());
+				//throw new IllegalArgumentException("scope specified does not contain collection specified: scope: "+resultScope+" collection: "+getCollection());
+			}
+		} else if ( getCollection() == null){
+			if( resultScope != null){
+				if ( resultScope.collections() != null){
+					if ( resultScope.collections().size() != 1){
+						throw new IllegalArgumentException("no collection specified, and scope contains zero or multiple collections "+getScope());
+					}
+					// setCollection(getScope().collections().iterator().next());
+				}
+			}
+		}
+		return resultScope;
 	}
 
 	public void setMeta(Meta metaAnnotation) {
 		Meta meta = metaAnnotation;
 	}
 
+	public void setCouchbaseOptions(CommonOptions<?> couchbaseOptions) {
+		this.couchbaseOptions = couchbaseOptions;
+	}
+
+	public CommonOptions<?> getCouchbaseOptions() {
+		return this.couchbaseOptions;
+	}
+
+	public void setCollection(CollectionSpec collection) {
+		this.collection = collection;
+	}
+
+	public CollectionSpec getCollection() {
+		return this.collection;
+	}
+
+	public void setScope(ScopeSpec scope) {
+		this.scope = scope;
+	}
+
+	public ScopeSpec getScope() {
+		return this.scope;
+	}
+
+	public void setCollectionName(CollectionName collectionName) {
+		this.collectionName = collectionName;
+	}
+
+	public CollectionName getCollectionName() {
+		return this.collectionName;
+	}
+
+	public void setScopeName(ScopeName scopeName) {
+		this.scopeName = scopeName;
+	}
+
+	public ScopeName getScopeName() {
+		return this.scopeName;
+	}
 }

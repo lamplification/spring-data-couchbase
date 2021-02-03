@@ -83,7 +83,7 @@ public class N1qlQueryCreator extends AbstractQueryCreator<Query, QueryCriteria>
 
 	@Override
 	protected Query complete(QueryCriteria criteria, Sort sort) {
-		return (criteria == null ? new Query() : new Query().addCriteria(criteria)).with(sort);
+		 return (criteria == null ? new Query() : new Query().addCriteria(criteria)).with(sort);
 	}
 
 	private QueryCriteria from(final Part part, final CouchbasePersistentProperty property, final QueryCriteria criteria,

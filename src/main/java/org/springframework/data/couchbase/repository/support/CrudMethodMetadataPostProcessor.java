@@ -129,7 +129,7 @@ class CrudMethodMetadataPostProcessor implements RepositoryProxyPostProcessor, B
 
 			Method method = invocation.getMethod();
 
-			if (!implementations.contains(method)) {
+			if (!implementations.contains(method)) { //invocation.getThis() is the repository object;
 				return invocation.proceed();
 			}
 

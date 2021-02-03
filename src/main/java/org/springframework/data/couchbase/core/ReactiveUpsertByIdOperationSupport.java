@@ -70,6 +70,8 @@ public class ReactiveUpsertByIdOperationSupport implements ReactiveUpsertByIdOpe
 		public Mono<T> one(T object) {
 			return Mono.just(object).flatMap(o -> {
 				CouchbaseDocument converted = template.support().encodeEntity(o);
+				// using collection works fine for collection == null or "_default", when scope is not set in clientFactory
+				// but if scope is set, then the collection must be specified as well.
 				return template.getCollection(collection).reactive()
 						.upsert(converted.getId(), converted.export(), buildUpsertOptions(converted)).map(result -> {
 							Object updatedObject = template.support().applyUpdatedId(o, converted.getId());

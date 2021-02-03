@@ -77,7 +77,7 @@ public class ExecutableUpsertByIdOperationSupport implements ExecutableUpsertByI
 
 		@Override
 		public TerminatingUpsertById<T> inCollection(final String collection) {
-			Assert.hasText(collection, "Collection must not be null nor empty.");
+			//Assert.hasText(collection, "Collection must not be null nor empty.");
 			return new ExecutableUpsertByIdSupport<>(template, domainType, collection, persistTo, replicateTo,
 					durabilityLevel, expiry);
 		}

@@ -91,8 +91,9 @@ import org.springframework.data.couchbase.domain.Config;
 @Timeout(value = 10, unit = TimeUnit.MINUTES) // Safety timer so tests can't block CI executors
 public class JavaIntegrationTests extends ClusterAwareIntegrationTests {
 
-	@Autowired static public CouchbaseTemplate couchbaseTemplate;
-	@Autowired static public ReactiveCouchbaseTemplate reactiveCouchbaseTemplate;
+	//Autowired annotation is not supported on static fields
+	static public CouchbaseTemplate couchbaseTemplate;
+	static public ReactiveCouchbaseTemplate reactiveCouchbaseTemplate;
 
 	@BeforeAll
 	public static void beforeAll() {
@@ -107,6 +108,7 @@ public class JavaIntegrationTests extends ClusterAwareIntegrationTests {
 		ApplicationContext ac = new AnnotationConfigApplicationContext(Config.class);
 		couchbaseTemplate = (CouchbaseTemplate) ac.getBean(COUCHBASE_TEMPLATE);
 		reactiveCouchbaseTemplate = (ReactiveCouchbaseTemplate) ac.getBean(REACTIVE_COUCHBASE_TEMPLATE);
+		System.err.println("JavaIntegrationTests.beforeAll() couchbaseTemplate: "+couchbaseTemplate);
 	}
 
 	/**
@@ -142,14 +144,27 @@ public class JavaIntegrationTests extends ClusterAwareIntegrationTests {
 		CollectionSpec collSpec = CollectionSpec.create(collectionName, scopeName);
 
 		if (!scopeName.equals("_default")) {
-			collectionManager.createScope(scopeName);
+			try {
+				collectionManager.createScope(scopeName);
+				waitUntilCondition(() -> scopeExists(collectionManager, scopeName));
+				ScopeSpec found = collectionManager.getScope(scopeName);
+				assertEquals(scopeSpec, found);
+			} catch( CouchbaseException e){
+				if( !e.toString().contains("already exists")){
+					e.printStackTrace();
+					throw e;
+				}
+			}
 		}
 
-		waitUntilCondition(() -> scopeExists(collectionManager, scopeName));
-		ScopeSpec found = collectionManager.getScope(scopeName);
-		assertEquals(scopeSpec, found);
-
-		collectionManager.createCollection(collSpec);
+		try {
+			collectionManager.createCollection(collSpec);
+		} catch(CouchbaseException e){
+			if( !e.toString().contains("already exists")){
+				e.printStackTrace();
+				throw e;
+			}
+		}
 		waitUntilCondition(() -> collectionExists(collectionManager, collSpec));
 		waitUntilCondition(
 				() -> collectionReady(cluster.bucket(config().bucketname()).scope(scopeName).collection(collectionName)));
@@ -258,6 +273,7 @@ public class JavaIntegrationTests extends ClusterAwareIntegrationTests {
 			String collectionName) {
 		CreatePrimaryQueryIndexOptions options = CreatePrimaryQueryIndexOptions.createPrimaryQueryIndexOptions();
 		options.timeout(Duration.ofSeconds(300));
+		options.ignoreIfExists(true);
 		final CreatePrimaryQueryIndexOptions.Built builtOpts = options.build();
 		final String indexName = builtOpts.indexName().orElse(null);
 

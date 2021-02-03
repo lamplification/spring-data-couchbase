@@ -57,7 +57,7 @@ public class ExecutableExistsByIdOperationSupport implements ExecutableExistsByI
 
 		@Override
 		public TerminatingExistsById inCollection(final String collection) {
-			Assert.hasText(collection, "Collection must not be null nor empty.");
+			//Assert.hasText(collection, "Collection must not be null nor empty.");
 			return new ExecutableExistsByIdSupport(template, collection);
 		}
 
